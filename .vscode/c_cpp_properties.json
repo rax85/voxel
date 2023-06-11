@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/bazel-voxel/external/com_google_googletest/googletest/include/",
+                "${workspaceFolder}/bazel-voxel/external/bazel_tools/",
+                "${workspaceFolder}/bazel-voxel/external/libmath/",
+                "${workspaceFolder}/bazel-voxel/external/simplestl/",
+                "${workspaceFolder}/bazel-voxel/external/simplebmp/",
+                "${workspaceFolder}/bazel-voxel/external/workqueue/"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c17",
+            "cppStandard": "c++20",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}
