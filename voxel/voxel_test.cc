@@ -19,20 +19,20 @@ std::string ResolvePath(const std::string& path) {
 }
 
 
-class TestVoxel2d : public Voxel {
+class TestVoxel : public Voxel {
   public:
     int val_;
 };
 
 
 TEST(VoxelGrid2dTests, NonExistentBmp) {
-  VoxelGrid2d<TestVoxel2d> grid;
-  EXPECT_FALSE(BuildFromBmp("/foo/bar.bmp", 1.0, &grid));
+  VoxelGrid2d<TestVoxel> grid;
+  EXPECT_FALSE(voxel::builder::BuildFromBmp("/foo/bar.bmp", 1.0, &grid));
 }
 
 TEST(VoxelGrid2dTests, CreateGrid) {
-  VoxelGrid2d<TestVoxel2d> grid;
-  EXPECT_TRUE(BuildFromBmp(ResolvePath("__main__/voxel/testdata/test.bmp"), 1.0, &grid));
+  VoxelGrid2d<TestVoxel> grid;
+  EXPECT_TRUE(voxel::builder::BuildFromBmp(ResolvePath("__main__/voxel/testdata/test.bmp"), 1.0, &grid));
 
   /*
    *        E  E  E  E  E (4, 4)
@@ -72,6 +72,21 @@ TEST(VoxelGrid2dTests, CreateGrid) {
   EXPECT_EQ(grid.At(4, 2)->type, kVoxelTypeExternal);
   EXPECT_EQ(grid.At(4, 3)->type, kVoxelTypeExternal);
   EXPECT_EQ(grid.At(4, 4)->type, kVoxelTypeExternal);
+}
+
+TEST(VoxelGrid3dTests, StlCubeWithCutout) {
+  VoxelGrid3d<TestVoxel> grid;
+  EXPECT_TRUE(voxel::builder::BuildFromStl(ResolvePath("__main__/voxel/testdata/cube_with_cutout.stl"), &grid, 0.1));
+}
+
+TEST(VoxelGrid3dTests, StlHollowCube) {
+  VoxelGrid3d<TestVoxel> grid;
+  EXPECT_TRUE(voxel::builder::BuildFromStl(ResolvePath("__main__/voxel/testdata/hollow_cube.stl"), &grid, 0.1));
+}
+
+TEST(VoxelGrid3dTests, StlPyramid) {
+  VoxelGrid3d<TestVoxel> grid;
+  EXPECT_TRUE(voxel::builder::BuildFromStl(ResolvePath("__main__/voxel/testdata/pyramid.stl"), &grid, 0.1));
 }
 
 }

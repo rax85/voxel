@@ -8,7 +8,6 @@
 #include <memory>
 #include <vector>
 
-#include "simplebmp/simplebmp.h"
 #include "workqueue/grid.h"
 #include "workqueue/workqueue.h"
 
@@ -23,14 +22,6 @@ class Voxel {
   public:
     int32_t type = kVoxelTypeUndefined;
 };
-
-namespace internal {
-
-  void GetBoundsFromBmp(const std::filesystem::path& bmp, int64_t* x_max, int64_t* y_max);
-  void GetBoundsFromStl(const std::filesystem::path& stl, double step, int64_t* x_max, int64_t* y_max, int64_t* z_max);
-
-}
-
 
 template <std::derived_from<Voxel> T>
 class VoxelGrid2d : public workqueue::Grid2d<T> {
@@ -104,14 +95,13 @@ class VoxelGrid2d : public workqueue::Grid2d<T> {
 
 
 template <std::derived_from<Voxel> T>
-class VoxelGrid3d : workqueue::Grid3d<T> {
+class VoxelGrid3d : public workqueue::Grid3d<T> {
   public:
-    VoxelGrid3d(const std::filesystem::path& stl, size_t step) {
+    void Init(int64_t x_dim, int64_t y_dim, int64_t z_dim, size_t step) {
+      this->x_dim_ = x_dim;
+      this->y_dim_ = y_dim;
+      this->z_dim_ = z_dim;
       step_ = step;
-      internal::GetBoundsFromStl(stl, step, &this->x_dim_, &this->y_dim_, &this->z_dim_);
-      assert(this->x_dim_ > 0);
-      assert(this->y_dim_ > 0);
-      assert(this->z_dim_ > 0);
       this->elements_.resize(this->x_dim_ * this->y_dim_ * this->z_dim_);
     }
 
@@ -120,62 +110,63 @@ class VoxelGrid3d : workqueue::Grid3d<T> {
     int64_t ZDim() const { return this->z_dim_; }
     double Step() const { return step_; }
 
-  private:
-    double step_ = 0;
-};
+    void AddForeachXYZCallback(std::function<void(void*, int64_t, int64_t, int64_t)> callback) {
+      foreach_xyz_callbacks_.push_back(callback);
+    }
 
-
-template <std::derived_from<Voxel> T>
-class VoxelGrid3dParallelTask {
-  public:
-    VoxelGrid3dParallelTask(workqueue::WorkQueue* work_queue, VoxelGrid3d<T>* grid) : work_queue_(work_queue), grid_(grid) {}
-
-    virtual void ForEachXY(VoxelGrid3d<T>* grid, int64_t x, int64_t y) {}
-    virtual void ForEachXYZ(VoxelGrid3d<T>* grid, int64_t x, int64_t y, int64_t z) {}
+    void ClearForeachXYZCallbacks() {
+      foreach_xyz_callbacks_.clear();
+    }
 
     void Run() {
-      for (int64_t x = 0; x < grid_->XDim(); x++) {
-        for (int64_t y = 0; y < grid_->YDim(); y++) {
-          tasks_->push_back(std::make_shared<SubTask>(this, x, y));
+      for (int64_t x = 0; x < this->x_dim_; x++) {
+        for (int64_t y = 0; y < this->y_dim_; y++) {
+          tasks_.push_back(std::make_shared<Task>(this, x, y));
         }
       }
-      for (auto& task : tasks_) {
-        work_queue_->Enqueue(task);
+      for (auto& task : this->tasks_) {
+        workqueue_.Enqueue(task);
       }
     }
 
     void WaitForCompletion() {
-      for (auto& task : tasks_) {
+      for (auto& task : this->tasks_) {
         task->WaitForFinish();
+      }
+      tasks_.clear();
+    }
+
+    void RunSync(bool clear_on_completion) {
+      Run();
+      WaitForCompletion();
+      if (clear_on_completion) {
+        ClearForeachXYZCallbacks();
       }
     }
 
-    void RunSync() {
-      Run();
-      WaitForCompletion();
-    }
-
   private:
-    class SubTask : workqueue::WorkItem {
+    class Task : public workqueue::WorkItem {
       public:
-        SubTask(VoxelGrid3dParallelTask* parent, int64_t x, int64_t y) : parent_(parent), x_(x), y_(y) {}
+        Task(VoxelGrid3d* grid, int64_t x, int64_t y) : grid_(grid), cur_x_(x), cur_y_(y) {}
 
-        void Run() override {
-          parent_->ForEachXY(parent_->grid_, x_, y_);
-          for (int64_t z = 0; z < parent_->grid_->ZDim(); z++) {
-            parent_->ForEachXYZ(parent_->grid_, x_, y_, z);
+        void Run() {
+          for (int64_t z = 0; z < grid_->ZDim(); z++) {
+            for (auto& callback : grid_->foreach_xyz_callbacks_) {
+              callback(grid_, cur_x_, cur_y_, z);
+            }
           }
         }
 
       private:
-        VoxelGrid3dParallelTask* parent_;
-        int64_t x_;
-        int64_t y_;
+        VoxelGrid3d* grid_;
+        int64_t cur_x_;
+        int64_t cur_y_;
     };
 
-    workqueue::WorkQueue* work_queue_;
-    VoxelGrid3d<T>* grid_;
-    std::vector<std::shared_ptr<SubTask>> tasks_;
+    double step_ = 0;
+    std::vector<std::shared_ptr<workqueue::WorkItem>> tasks_;
+    workqueue::WorkQueue workqueue_;
+    std::vector<std::function<void(void* data, int64_t x, int64_t y, int64_t z)>> foreach_xyz_callbacks_;
 };
 
 }

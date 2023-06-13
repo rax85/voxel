@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <concepts>
@@ -8,18 +9,35 @@
 #include <memory>
 #include <vector>
 
+#include "libmath/line.h"
+#include "libmath/plane.h"
 #include "simplebmp/simplebmp.h"
+#include "simplestl/simplestl.h"
 #include "voxel/voxel.h"
 #include "workqueue/grid.h"
 #include "workqueue/workqueue.h"
 
 
-namespace voxel {
+namespace voxel::builder {
 namespace internal {
 
-bool IsBlack(const simplebmp::Color& color) {
-  return color.r == 0 && color.g == 0 && color.b == 0;
-}
+// Tests whether a pixel is black.
+bool IsBlack(const simplebmp::Color& color);
+
+// Computes the dims of the bounding box of a set of triangles from a stl file.
+void ComputeBoundingBox(std::span<libmath::Triangle> triangles, double& width, double& height, double& depth);
+
+// Computes a list of planes corresponding to the list of triangles, translated by an amount.
+std::vector<libmath::Plane> ComputePlane(std::span<libmath::Triangle> triangles, double translate_x, double translate_y, double translate_z);
+
+// Computes the minimum number of steps needed to discretize the dimension.
+int64_t ComputeSteps(double dim, double step);
+
+// Create a point given the x, y, and z step.
+libmath::Point MakePoint(int64_t x, int64_t y, int64_t z, double step);
+
+// Computes the number of triangles intersected by the line between the specified points.
+int64_t ComputeIntersections(std::span<libmath::Plane> triangles, const libmath::Point& p1, const libmath::Point& p2);
 
 }
 
@@ -63,6 +81,81 @@ bool BuildFromBmp(const std::filesystem::path& bmp, double step, VoxelGrid2d<T>*
   });
   grid->RunSync(true);
 
+  return true;
+}
+
+template <std::derived_from<Voxel> T>
+bool BuildFromStl(const std::filesystem::path& stl_path, VoxelGrid3d<T>* grid, double step,
+                  int64_t extra_steps_x = 2, int64_t extra_steps_y = 2, int64_t extra_steps_z = 2) {
+  simplestl::StlReader reader(stl_path);
+  std::vector<libmath::Triangle> triangles;
+  if (!reader.Read(&triangles)) {
+    return false;
+  }
+
+  // At least 1 extra step is required for the algorithm to work, 2 to be safe.
+  extra_steps_x = std::max(static_cast<int64_t>(2), extra_steps_x);
+  extra_steps_y = std::max(static_cast<int64_t>(2), extra_steps_y);
+  extra_steps_z = std::max(static_cast<int64_t>(2), extra_steps_z);
+
+  // Compute bounding box and resize grid.
+  double width = 0, height = 0, depth = 0;
+  internal::ComputeBoundingBox(triangles, width, height, depth);
+  width += 2 * extra_steps_x * step;
+  height += 2 * extra_steps_y * step;
+  depth += 2 * extra_steps_z * step;
+
+  int64_t x_dim = internal::ComputeSteps(width, step);
+  int64_t y_dim = internal::ComputeSteps(height, step);
+  int64_t z_dim = internal::ComputeSteps(depth, step);
+  grid->Init(x_dim, y_dim, z_dim, step);
+
+  // Recompute triangles as planes and release triangle memory.
+  std::vector<libmath::Plane> planes = internal::ComputePlane(triangles, extra_steps_x * step, extra_steps_y * step, extra_steps_z * step);
+  triangles.clear();
+
+  double halfstep = step / 2;
+  grid->AddForeachXYZCallback([&](void* data, int64_t x, int64_t y, int64_t z) {
+    VoxelGrid3d<T>* grid = reinterpret_cast<VoxelGrid3d<T>*>(data);
+    libmath::Point p = internal::MakePoint(x, y, z, step);
+
+    // If the point lies on a triangle, it is a boundary.
+    for (const auto& plane : planes) {
+      if (plane.ContainsWithinBounds(p, halfstep)) {
+        grid->At(x, y, z)->type = kVoxelTypeInternal | kVoxelTypeBoundary;
+        return;
+      }
+    }
+  });
+  grid->RunSync(true);
+
+  // Recalculate to adjust for the ceil used in the step calculation.
+  width = x_dim * step;
+  height = y_dim * step;
+  depth = z_dim * step;
+
+  // For each point, determine whether the voxel is internal or external.
+  grid->AddForeachXYZCallback([&](void* data, int64_t x, int64_t y, int64_t z) {
+    VoxelGrid3d<T>* grid = reinterpret_cast<VoxelGrid3d<T>*>(data);
+    libmath::Point p = internal::MakePoint(x, y, z, step);
+    auto* cur_voxel = grid->At(x, y, z);
+
+    // If we marked this as a surface voxel, leave it alone.
+    if (cur_voxel->type == (kVoxelTypeInternal | kVoxelTypeBoundary)) {
+      return;
+    }
+
+    bool odd_intersection_count = true;
+    odd_intersection_count &= internal::ComputeIntersections(planes, p, {p.x, height, p.z}) % 2; // Up [ +y ]
+    odd_intersection_count &= internal::ComputeIntersections(planes, p, {p.x, 0, p.z}) % 2; // Down [ -y ]
+    odd_intersection_count &= internal::ComputeIntersections(planes, p, {width, p.y, p.z}) % 2; // Right [ +x ]
+    odd_intersection_count &= internal::ComputeIntersections(planes, p, {0, p.y, p.z}) % 2; // Left [ -x ]
+    odd_intersection_count &= internal::ComputeIntersections(planes, p, {p.x, p.y, depth}) % 2; // Front [ +z ]
+    odd_intersection_count &= internal::ComputeIntersections(planes, p, {p.x, p.y, 0}) % 2; // Back [ -z ]
+
+    cur_voxel->type = odd_intersection_count ? kVoxelTypeInternal : kVoxelTypeExternal;
+  });
+  grid->RunSync(true);
   return true;
 }
 

@@ -7,6 +7,9 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+      "@libmath//libmath:line",
+      "@libmath//libmath:plane",
+      "@libmath//libmath:triangle",
       "@simplebmp//simplebmp:simplebmp",
       "@simplestl//simplestl:simplestl",
       "@workqueue//workqueue:grid",
