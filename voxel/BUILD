@@ -3,13 +3,15 @@ cc_library(
     srcs = ["voxel.cc"],
     hdrs = [
         "voxel.h",
-        "builder.h"
+        "builder.h",
+        "renderer.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
       "@libmath//libmath:line",
       "@libmath//libmath:plane",
       "@libmath//libmath:triangle",
+      "@simplebmp//simplebmp:canvas",
       "@simplebmp//simplebmp:simplebmp",
       "@simplestl//simplestl:simplestl",
       "@workqueue//workqueue:grid",

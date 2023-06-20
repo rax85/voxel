@@ -1,6 +1,9 @@
 #include "voxel/voxel.h"
 
+#include <filesystem>
+
 #include "voxel/builder.h"
+#include "voxel/renderer.h"
 
 #include "gtest/gtest.h"
 #include "tools/cpp/runfiles/runfiles.h"
@@ -72,6 +75,32 @@ TEST(VoxelGrid2dTests, CreateGrid) {
   EXPECT_EQ(grid.At(4, 2)->type, kVoxelTypeExternal);
   EXPECT_EQ(grid.At(4, 3)->type, kVoxelTypeExternal);
   EXPECT_EQ(grid.At(4, 4)->type, kVoxelTypeExternal);
+}
+
+TEST(VoxelGrid2dTests, RenderTest) {
+  VoxelGrid2d<TestVoxel> grid;
+  ASSERT_TRUE(voxel::builder::BuildFromBmp(ResolvePath("__main__/voxel/testdata/test.bmp"), 1.0, &grid));
+  simplebmp::Canvas canvas(grid.XDim(), grid.YDim(), 2);
+  simplebmp::Color4f red(1.0f, 0.0f, 0.0f, 1.0f);
+  simplebmp::Color4f white(1.0f, 1.0f, 1.0f, 1.0f);
+  simplebmp::Color4f black;
+  renderer::Render(grid, &canvas, [&](int64_t x, int64_t y, double step, const void* voxel) -> simplebmp::Color4f {
+    const TestVoxel* v = reinterpret_cast<const TestVoxel*>(voxel);
+    if ((v->type & kVoxelTypeBoundary) == kVoxelTypeBoundary) {
+      return red;
+    }
+    if (v->type == kVoxelTypeInternal) {
+      return black;
+    }
+    return white;
+  });
+
+  std::optional<simplebmp::Image> maybe_image = simplebmp::Image::Load(ResolvePath("__main__/voxel/testdata/test_render.bmp"));
+  ASSERT_TRUE(maybe_image.has_value());
+  const simplebmp::Image& reference = maybe_image.value();
+
+  simplebmp::Image actual(canvas);
+  EXPECT_EQ(actual, reference);
 }
 
 TEST(VoxelGrid3dTests, StlCubeWithCutout) {
