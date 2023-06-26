@@ -1,6 +1,7 @@
 #include "voxel/voxel.h"
 
 #include <filesystem>
+#include <string>
 
 #include "voxel/builder.h"
 #include "voxel/renderer.h"
@@ -103,19 +104,88 @@ TEST(VoxelGrid2dTests, RenderTest) {
   EXPECT_EQ(actual, reference);
 }
 
-TEST(VoxelGrid3dTests, StlCubeWithCutout) {
+simplebmp::Color4f RenderCallback(int64_t x, int64_t y, int64_t z, double step, const void* voxel) {
+  const TestVoxel* v = reinterpret_cast<const TestVoxel*>(voxel);
+  simplebmp::Color4f red(1.0f, 0.0f, 0.0f, 1.0f);
+  simplebmp::Color4f blue(0.0f, 0.0f, 1.0f, 1.0f);
+  simplebmp::Color4f white(1.0f, 1.0f, 1.0f, 1.0f);
+  simplebmp::Color4f black;
+
+  if ((v->type & kVoxelTypeBoundary) == kVoxelTypeBoundary) {
+    return red;
+  }
+  if (v->type == kVoxelTypeInternal) {
+    return black;
+  } else if (v->type == kVoxelTypeExternal) {
+    return white;
+  }
+  return blue;
+}
+
+void StlTestHelper(const std::string& prefix) {
   VoxelGrid3d<TestVoxel> grid;
-  EXPECT_TRUE(voxel::builder::BuildFromStl(ResolvePath("__main__/voxel/testdata/cube_with_cutout.stl"), &grid, 0.1));
+  EXPECT_TRUE(voxel::builder::BuildFromStl(ResolvePath("__main__/voxel/testdata/" + prefix + ".stl"), &grid, 1.0));
+
+  {
+    simplebmp::Canvas canvas_xy(grid.XDim(), grid.YDim(), 2);
+    renderer::RenderSliceXY(grid, grid.ZDim() / 2, &canvas_xy, RenderCallback);
+    simplebmp::Image actual_xy(canvas_xy);
+    EXPECT_TRUE(actual_xy.Write(std::filesystem::temp_directory_path().append(prefix + "_xy.bmp").c_str()));
+
+    auto maybe_ref = simplebmp::Image::Load(ResolvePath("__main__/voxel/testdata/" + prefix + "_xy.bmp"));
+    ASSERT_TRUE(maybe_ref.has_value());
+    EXPECT_EQ(maybe_ref.value(), actual_xy);
+  }
+
+  {
+    simplebmp::Canvas canvas_xz(grid.XDim(), grid.ZDim(), 2);
+    renderer::RenderSliceXZ(grid, grid.YDim() / 2, &canvas_xz, RenderCallback);
+    simplebmp::Image actual_xz(canvas_xz);
+    EXPECT_TRUE(actual_xz.Write(std::filesystem::temp_directory_path().append(prefix + "_xz.bmp").c_str()));
+
+    auto maybe_ref = simplebmp::Image::Load(ResolvePath("__main__/voxel/testdata/" + prefix + "_xz.bmp"));
+    ASSERT_TRUE(maybe_ref.has_value());
+    EXPECT_EQ(maybe_ref.value(), actual_xz);
+  }
+
+  {
+    simplebmp::Canvas canvas_yz(grid.ZDim(), grid.YDim(), 2);
+    renderer::RenderSliceYZ(grid, grid.XDim() / 2, &canvas_yz, RenderCallback);
+    simplebmp::Image actual_yz(canvas_yz);
+    EXPECT_TRUE(actual_yz.Write(std::filesystem::temp_directory_path().append(prefix + "_yz.bmp").c_str()));
+
+    auto maybe_ref = simplebmp::Image::Load(ResolvePath("__main__/voxel/testdata/" + prefix + "_yz.bmp"));
+    ASSERT_TRUE(maybe_ref.has_value());
+    EXPECT_EQ(maybe_ref.value(), actual_yz);
+  }
+}
+
+TEST(VoxelGrid3dTests, StlCube) {
+  StlTestHelper("cube");
+}
+
+TEST(VoxelGrid3dTests, StlSphere) {
+  StlTestHelper("sphere");
+}
+
+TEST(VoxelGrid3dTests, StlCone) {
+  StlTestHelper("cone");
+}
+
+TEST(VoxelGrid3dTests, StlCylinder) {
+  StlTestHelper("cylinder");
+}
+
+TEST(VoxelGrid3dTests, StlCubeWithCutout) {
+  StlTestHelper("cube_with_cutout");
 }
 
 TEST(VoxelGrid3dTests, StlHollowCube) {
-  VoxelGrid3d<TestVoxel> grid;
-  EXPECT_TRUE(voxel::builder::BuildFromStl(ResolvePath("__main__/voxel/testdata/hollow_cube.stl"), &grid, 0.1));
+  StlTestHelper("hollow_cube");
 }
 
 TEST(VoxelGrid3dTests, StlPyramid) {
-  VoxelGrid3d<TestVoxel> grid;
-  EXPECT_TRUE(voxel::builder::BuildFromStl(ResolvePath("__main__/voxel/testdata/pyramid.stl"), &grid, 0.1));
+  StlTestHelper("pyramid");
 }
 
 }

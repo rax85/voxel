@@ -4,7 +4,6 @@
 #include <cassert>
 #include <cstdint>
 #include <concepts>
-#include <iostream>
 #include <filesystem>
 #include <memory>
 #include <vector>
@@ -114,21 +113,6 @@ bool BuildFromStl(const std::filesystem::path& stl_path, VoxelGrid3d<T>* grid, d
   std::vector<libmath::Plane> planes = internal::ComputePlane(triangles, extra_steps_x * step, extra_steps_y * step, extra_steps_z * step);
   triangles.clear();
 
-  double halfstep = step / 2;
-  grid->AddForeachXYZCallback([&](void* data, int64_t x, int64_t y, int64_t z) {
-    VoxelGrid3d<T>* grid = reinterpret_cast<VoxelGrid3d<T>*>(data);
-    libmath::Point p = internal::MakePoint(x, y, z, step);
-
-    // If the point lies on a triangle, it is a boundary.
-    for (const auto& plane : planes) {
-      if (plane.ContainsWithinBounds(p, halfstep)) {
-        grid->At(x, y, z)->type = kVoxelTypeInternal | kVoxelTypeBoundary;
-        return;
-      }
-    }
-  });
-  grid->RunSync(true);
-
   // Recalculate to adjust for the ceil used in the step calculation.
   width = x_dim * step;
   height = y_dim * step;
@@ -140,22 +124,43 @@ bool BuildFromStl(const std::filesystem::path& stl_path, VoxelGrid3d<T>* grid, d
     libmath::Point p = internal::MakePoint(x, y, z, step);
     auto* cur_voxel = grid->At(x, y, z);
 
-    // If we marked this as a surface voxel, leave it alone.
-    if (cur_voxel->type == (kVoxelTypeInternal | kVoxelTypeBoundary)) {
-      return;
-    }
-
     bool odd_intersection_count = true;
     odd_intersection_count &= internal::ComputeIntersections(planes, p, {p.x, height, p.z}) % 2; // Up [ +y ]
-    odd_intersection_count &= internal::ComputeIntersections(planes, p, {p.x, 0, p.z}) % 2; // Down [ -y ]
-    odd_intersection_count &= internal::ComputeIntersections(planes, p, {width, p.y, p.z}) % 2; // Right [ +x ]
-    odd_intersection_count &= internal::ComputeIntersections(planes, p, {0, p.y, p.z}) % 2; // Left [ -x ]
-    odd_intersection_count &= internal::ComputeIntersections(planes, p, {p.x, p.y, depth}) % 2; // Front [ +z ]
-    odd_intersection_count &= internal::ComputeIntersections(planes, p, {p.x, p.y, 0}) % 2; // Back [ -z ]
+    odd_intersection_count &= internal::ComputeIntersections(planes, p, {p.x, 0, p.z}) % 2;      // Down [ -y ]
+    odd_intersection_count &= internal::ComputeIntersections(planes, p, {width, p.y, p.z}) % 2;  // Right [ +x ]
+    odd_intersection_count &= internal::ComputeIntersections(planes, p, {0, p.y, p.z}) % 2;      // Left [ -x ]
+    odd_intersection_count &= internal::ComputeIntersections(planes, p, {p.x, p.y, depth}) % 2;  // Front [ +z ]
+    odd_intersection_count &= internal::ComputeIntersections(planes, p, {p.x, p.y, 0}) % 2;      // Back [ -z ]
 
     cur_voxel->type = odd_intersection_count ? kVoxelTypeInternal : kVoxelTypeExternal;
   });
   grid->RunSync(true);
+
+  // Mark each internal voxel that has at least one non-internal neighbor, mark it as a boundary.
+  grid->AddForeachXYZCallback([&](void* data, int64_t x, int64_t y, int64_t z) {
+    VoxelGrid3d<T>* grid = reinterpret_cast<VoxelGrid3d<T>*>(data);
+    auto* cur_voxel = grid->At(x, y, z);
+
+    // If it's an external voxel, leave it alone.
+    if (cur_voxel->type == kVoxelTypeExternal) {
+      return;
+    }
+
+    // Check if it has any external neighbors.
+    bool has_external_neighbor = false;
+    for (const auto* neighbor : grid->D3Q27(x, y, z)) {
+      if (neighbor != nullptr && neighbor->type == kVoxelTypeExternal) {
+        has_external_neighbor = true;
+        break;
+      }
+    }
+
+    if (has_external_neighbor) {
+      cur_voxel->type |= kVoxelTypeBoundary;
+    }
+  });
+  grid->RunSync(true);
+
   return true;
 }
 

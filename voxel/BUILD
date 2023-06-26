@@ -8,6 +8,7 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+      "@com_github_google_glog//:glog",
       "@libmath//libmath:line",
       "@libmath//libmath:plane",
       "@libmath//libmath:triangle",
